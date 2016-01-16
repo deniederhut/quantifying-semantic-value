@@ -1,0 +1,125 @@
+---
+title: "A method for measuring the semantic value of words"
+author: "Dillon Niederhut"
+date: "September 8, 2015"
+output: pdf_document
+---
+
+```{r, echo=FALSE}
+library(ggplot2)
+library(xtable)
+library(dplyr)
+total_terms = 108298038L
+top.uni <- read.csv('data/top1grams.csv', stringsAsFactors=FALSE)
+data <- read.csv('data/term_freq_chisq.csv', stringsAsFactors=FALSE)
+data$tf <- data$tf / total_terms
+control <- read.csv('data/term_freq_control.csv', stringsAsFactors=FALSE)
+control$tf <- control$tf / total_terms
+```
+
+# Gram use follows Zipfian distribution
+
+```{r}
+ggplot(data=top.uni, aes(x=rank,y=proportion)) + 
+  geom_bar(stat='identity', width=0.7) + 
+  xlab('') + 
+  ylab('Relative Proportion') + 
+  ggtitle('')
+ggsave('output/fig1.png')
+```
+
+```{r}
+top.uni[1:10, c('token','proportion')]
+```
+
+# Intuitively, words used less often are more informative
+
+This is because they only apply to certain contexts
+
+A single word can give you a lot of context, if it is used in a constrained manner
+
+E.g. fedora
+
+# An informative word allows you to predict what other words will be used
+
+'Context' is very hard to measure
+
+We can substitute measuring context by looking at surrounding words
+
+We use the change in the Zipfian distribution *given* that a word is in the utterance to quantify the extent to which that word informs you about the context
+
+# Changes in your ability to predict can be measured with chi-squared
+
+Given that a word is used in an utterance:
+
+the difference between the distribution of use of all words in a language, and the distribution of use of words in utterances that include that word will give you a measure of how informative that word is
+
+we will call this the zipf-test
+
+however, the test is additive, meaning that the overall numeric value of the test is dependent on the sum of words used, which is dependent on word frequency, which is what we are trying to measure
+
+so we start with random sampling to find the sampling distribution of the zipf test
+
+# The sampling distribution of the Zipf-test
+
+The distribution of randomly samples chi-squared values becomes linear when both variables are square-root transformed. 
+
+```{r, fig.height=5, fig.width=8}
+ggplot(data=control, aes(x=log10(tf), y=log10(chisq))) + 
+  geom_point(alpha=0.5) + 
+  stat_smooth(method='loess') + 
+  xlab('log of Word Count') + 
+  ylab('log of Chi Squared Value') + 
+  ggtitle('')
+ggsave('output/fig2.png')
+```
+
+The square root of chi-squared values is almost perfectly predicted by the size (in number of grams) of each sample.
+
+```{r, fig.height=5, fig.width=8}
+ggplot(data=control, aes(x=sqrt(counts), y=sqrt(chisq))) + 
+  geom_point(alpha=0.5) + 
+  stat_smooth(method='lm') + 
+  xlab('Square Root of Word Count') + 
+  ylab('Square Root of Chi Squared Value') + 
+  ggtitle('')
+ggsave('output/fig3.png')
+control$chisq.sqrt <- sqrt(control$chisq)
+control$counts.sqrt <- sqrt(control$counts)
+model.1 <- lm(chisq.sqrt ~ counts.sqrt, data = control)
+summary(model.1)
+```
+
+Additionally, the variance of the square root of the zipf test values is nearly constant across four orders of magnitude difference in the term frequency. 
+
+```{r, }
+summarize(group_by(control, p), sd(chisq.sqrt))
+table2 <- xtable(summarize(group_by(control, p), sd(chisq.sqrt)), digits=-2)
+names(table2) <- c('Sampling probability', 'Std. Error')
+print.xtable(table2, type='latex', file='output/table2.tex')
+```
+
+To create a test, the values are:
+
+1. square root transformed; and
+2. corrected for this linear relationship
+
+```{r}
+control$c.chisq.sqrt <- control$chisq.sqrt - control$counts.sqrt * model.1$coefficients[[2]] - model.1$coefficients[[1]]
+control$z.chisq.sqrt <- (control$chisq.sqrt - control$counts.sqrt * model.1$coefficients[[2]] - model.1$coefficients[[1]]) / sd(control$c.chisq.sqrt)
+data$chisq.sqrt <- sqrt(data$chisq)
+data$counts.sqrt <- sqrt(data$counts)
+data$c.chisq.sqrt <- data$chisq.sqrt - data$counts.sqrt * model.1$coefficients[[2]] - model.1$coefficients[[1]]
+data$z.chisq.sqrt <- (data$chisq.sqrt - data$counts.sqrt * model.1$coefficients[[2]] - model.1$coefficients[[1]]) / sd(control$c.chisq.sqrt)
+```
+
+As a quick sanity check, we can look at the relative proportions and Zipf values of a spread of words
+
+```{r}
+words <- c('my', 'day', 'feel', 'dowm', 'record', 'dill', 
+           'unclear', 'hither', 'omlette', 'multicollinear')
+arrange(data[data$term %in% words, c('term', 'tf', 'z.chisq.sqrt')], z.chisq.sqrt)
+table3 <- xtable(arrange(data[data$term %in% words, c('term', 'tf', 'z.chisq.sqrt')], z.chisq.sqrt), digits=-2)
+names(table3) <- c('Term', 'Relative Proportion', 'Test Value')
+print.xtable(table3, type='latex', file='output/table3.tex', include.rownames=FALSE)
+```
